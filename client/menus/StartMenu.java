@@ -6,7 +6,9 @@ import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
+import java.awt.Cursor;
 import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import util.geom.VektorI;
 import menu.*;
 import client.ClientSettings;
@@ -20,6 +22,7 @@ import client.ClientSettings;
 public class StartMenu extends Menu{
     private MenuList localserverlist;
     private MenuButton newserverbutton;
+    private MenuButton deleteserverbutton;
     private MenuTextField serverPort;
     private MenuButton playlocalbutton;
     /**
@@ -36,12 +39,12 @@ public class StartMenu extends Menu{
         setFont(MenuSettings.MENU_FONT);
         new MenuLabel(this, "Hier könnte ihre Werbung stehen.", new VektorI(10,10), new VektorI(250,30));
         
-        new MenuLabel(this, "<html><b>Lokale Server: </b></html>", new VektorI(10,30), new VektorI(250,30));
+        new MenuLabel(this, "<html><b>Lokale Welten: </b></html>", new VektorI(10,30), new VektorI(250,30));
         try{
             Class mainC=Class.forName("server.Main");
             Class serializerC=Class.forName("server.Serializer");
             Class settingsC=Class.forName("server.Settings");
-            Class newServerMenuC=Class.forName("server.NewServerMenu");
+            //um import server.Main etc. zu vermeiden. Vermutlich war das eher eine dumme Idee. -LG
             
             localserverlist=new MenuList(this,new String[]{},new VektorI(10,60),new VektorI(250,340),15);
             updateLocalWorldlist();
@@ -51,28 +54,38 @@ public class StartMenu extends Menu{
                 public void onClick(){
                     String str=(String) localserverlist.getSelectedValue();
                     try{
+                        StartMenu.this.setCursor(new Cursor(Cursor.WAIT_CURSOR));
+                        ClientSettings.SERVER_ADDRESS="localhost";
                         if (currentMain!=null && mainC.getField("name").get(currentMain).equals(str)){
                             //Server bereits aktiv => gehostet
                             mainC.getMethod("start").invoke(currentMain); //Wenn der Server schon läuft, dann passiert in start() nichts. 
-                            //Wenn nicht (irgendein Fehler), dann wird er hier noch gestartet.
+                            //Wenn nicht, dann wird er hier noch gestartet.
                         }
                         else{
-                            Object main=serializerC.getMethod("deserialize",String.class).invoke(null,str);
                             try{
-                                settingsC.getField("SERVER_PORT").set(null,Integer.parseInt(serverPort.getText()));
+                                Object main=serializerC.getMethod("deserialize",String.class).invoke(null,str);
+                                try{
+                                    settingsC.getField("SERVER_PORT").set(null,Integer.parseInt(serverPort.getText()));
+                                }
+                                catch(NumberFormatException e){}
+                                if (currentMain!=null){ //irgendein Fehler
+                                    System.out.println("[StartMenu]: Aus irgendeinem Grund läuft bereits ein Server, der hiermit geschlossen wird.");
+                                    mainC.getMethod("exit").invoke(currentMain,true);
+                                }
+                                mainC.getMethod("start").invoke(main);
+                                try{
+                                    ClientSettings.SERVER_PORT=Integer.parseInt(serverPort.getText());
+                                }
+                                catch(NumberFormatException e){}
                             }
-                            catch(NumberFormatException e){}
-                            if (currentMain!=null){ //irgendein Fehler
-                                mainC.getMethod("exit").invoke(currentMain);
+                            catch(Exception exc){
+                                StartMenu.this.setCursor(Cursor.getDefaultCursor());
+                                System.out.println("[StartMenu]: Die Welt "+str+" konnte nicht erfolgreich deserialisiert werden.");
+                                return;
                             }
-                            mainC.getMethod("start").invoke(main);
-                            ClientSettings.SERVER_ADDRESS="localhost";
-                            try{
-                                ClientSettings.SERVER_PORT=Integer.parseInt(serverPort.getText());
-                            }
-                            catch(NumberFormatException e){}
                         }
-                        closeMenu();
+                        StartMenu.this.setCursor(Cursor.getDefaultCursor());
+                        StartMenu.this.closeMenu();
                         if ((boolean) mainC.getField("singleplayer").get(currentMain)){
                             LoginMenu lm=new LoginMenu();
                             lm.name.setText("Singleplayer");
@@ -86,12 +99,17 @@ public class StartMenu extends Menu{
                 }
             };
             
-            newserverbutton=new MenuButton(this, "Neuer Server", new VektorI(280,60), new VektorI(130,40)){
+            newserverbutton=new MenuButton(this, "Neue Welt", new VektorI(280,60), new VektorI(130,40)){
                 public void onClick(){
-                    try{
-                        newServerMenuC.getConstructor(StartMenu.class).newInstance(StartMenu.this);
-                    }
-                    catch(Exception e){}
+                    new NewServerMenu(StartMenu.this);
+                }
+            };
+            
+            deleteserverbutton=new MenuButton(this, "Welt löschen", new VektorI(280,110),new VektorI(130,40)){
+                public void onClick(){
+                    String str=(String) localserverlist.getSelectedValue();
+                    if (str!=null)
+                        new DeleteServerMenu(StartMenu.this,str);
                 }
             };
         }
@@ -117,7 +135,7 @@ public class StartMenu extends Menu{
                 }
                 else{
                     ClientSettings.SERVER_ADDRESS=address.getText();
-                    try{ClientSettings.SERVER_PORT=Integer.parseInt(port.getText());} catch(NumberFormatException e){System.out.println("Invalid Input: Port muss eine Zahl sein!");}
+                    try{ClientSettings.SERVER_PORT=Integer.parseInt(port.getText());} catch(NumberFormatException e){System.out.println("[StartMenu]: Invalid Input: Port muss eine Zahl sein!");}
                     closeMenu();
                     new LoginMenu();
                 }
@@ -125,6 +143,21 @@ public class StartMenu extends Menu{
         new MenuLabel(this,"<html>Verbindung mit <br/>einem unbekannten <br/>Server:</html>", new VektorI(720,240), new VektorI(130,60));
         address =new MenuTextField(this, "Adresse", new VektorI(720,300), new VektorI(130,20));
         port = new MenuTextField(this, "Port", new VektorI(720,330), new VektorI(130,20));
+        addWindowListener(new WindowAdapter(){
+            @Override
+            public void windowClosing(WindowEvent e){
+                try{
+                    //Kein Unterbrechen eines Serialisierungs-Vorgangs
+                    Class serializerC=Class.forName("server.Serializer");
+                    while((boolean) serializerC.getField("currentlyWorking").get(null)){
+                        Thread.sleep(1);
+                    }
+                }
+                catch(Exception exc){exc.printStackTrace();}
+                System.out.println("[StartMenu]: windowClosing");
+                System.exit(0);
+            }
+        });
         repaint();
     }
     
@@ -168,5 +201,98 @@ public class StartMenu extends Menu{
             localserverlist.setListData(namesArr);
         }
         catch(Exception e){}
+    }
+    
+    public class NewServerMenu extends Menu{
+        private MenuTextField name;
+        private MenuCheckBox hostbox;
+        public NewServerMenu(StartMenu startmenu){
+            super("Neue Welt erstellen",new VektorI(380,170));
+            try{
+                Class mainC=Class.forName("server.Main");
+                Class settingsC=Class.forName("server.Settings");
+                String folder=(String) settingsC.getField("GAMESAVE_FOLDER").get(null);
+                new MenuLabel(this, "Name", new VektorI(10,20), new VektorI(80,20));
+                name = new MenuTextField(this, "", new VektorI(100,20), new VektorI(250,20));
+                hostbox=new MenuCheckBox(this, "Server hosten",new VektorI(10,50),new VektorI(140,20),12);
+                new MenuButton(this, "Erstellen", new VektorI(10,80) , new VektorI(120,40), MenuSettings.MENU_BIG_FONT){
+                    public void onClick(){
+                        String n=name.getText();
+                        if (n.length()>0){
+                            if (!new File(folder).exists()){
+                                new File(folder).mkdirs();
+                            }
+                            for (File f: new File(folder).listFiles()){
+                                if (f.getName().equals(n+".ser")){
+                                    System.out.println("Ein Server des Names "+n+" existiert bereits.");
+                                    closeMenu();
+                                    return;
+                                }
+                            }
+                            try{
+                                NewServerMenu.this.setCursor(new Cursor(Cursor.WAIT_CURSOR));
+                                Object main=mainC.getMethod("newMain",String.class,boolean.class,boolean.class).invoke(null,n,!hostbox.isSelected(),false);
+                                if (hostbox.isSelected()){
+                                    mainC.getMethod("start").invoke(main);
+                                }
+                                NewServerMenu.this.setCursor(Cursor.getDefaultCursor());
+                                System.out.println("[StartMenu]: Der Server "+n+" wurde erstellt.");
+                            }
+                            catch(Exception e){e.printStackTrace();}
+                            startmenu.updateLocalWorldlist();
+                            closeMenu();
+                        }
+                    }
+                };
+                new MenuButton(this, "Schließen", new VektorI(230,80) , new VektorI(120,40), MenuSettings.MENU_BIG_FONT){
+                    public void onClick(){
+                        closeMenu();
+                    }
+                };
+                repaint();
+            }
+            catch(Exception e){
+                closeMenu();
+            }
+        }
+    }
+    
+    public class DeleteServerMenu extends Menu{
+        public DeleteServerMenu(StartMenu s, String servername){
+            super("Welt löschen", new VektorI(300,120));
+            try{
+                Class mainC=Class.forName("server.Main");
+                Class settingsC=Class.forName("server.Settings");
+                new MenuLabel(this, "Wollen Sie die Welt wirklich löschen?", new VektorI(10,10), new VektorI(300,20));
+                new MenuButton(this, "Ja", new VektorI(170,40), new VektorI(100, 30)){
+                    public void onClick(){
+                        try{
+                            if (mainC.getField("name").get(StartMenu.currentMain).equals(servername)){
+                                mainC.getMethod("exit").invoke(StartMenu.currentMain,false);
+                            }
+                        }
+                        catch(Exception e){}
+                        try{
+                            String folder=(String) settingsC.getField("GAMESAVE_FOLDER").get(null);
+                            File f=new File(folder+File.separator+servername+".ser");
+                            f.delete();
+                            System.out.println("[StartMenu]: Der Server "+servername+" wurde gelöscht.");
+                        }
+                        catch(Exception e){e.printStackTrace();}
+                        s.updateLocalWorldlist();
+                        closeMenu();
+                    }
+                };
+                new MenuButton(this,"Nein",new VektorI(10,40),new VektorI(100,30)){
+                    public void onClick(){
+                        closeMenu();
+                    }
+                };
+                repaint();
+            }
+            catch(Exception e){
+                closeMenu();
+            }
+        }
     }
 }
