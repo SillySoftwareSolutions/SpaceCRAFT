@@ -4,6 +4,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 /**
  * Sehr dumm. -LG
+ * 20.09.2020: 8947
  */
 public class LineCounter{
     public static int count(){
