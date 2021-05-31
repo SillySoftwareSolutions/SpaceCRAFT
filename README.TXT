@@ -9,7 +9,7 @@ DoTo:
 Regeln:
 * Alle Klassen und Methoden werden (auf Deutsch) genau beschrieben (Getter und Setter nicht zwingend)
 * Variablennamen etc. auf Englisch
-* Kommentare auf Deutsch, Englisch, FranzÃ¶sisch oder Japanisch (aber nur wenn es witzig ist!)
+* Kommentare auf Deutsch, Englisch, Franz&ouml;sisch oder Japanisch (aber nur wenn es witzig ist!)
 * Nur die Klassen importieren die wirklich benÃ¶tigt werden (nicht z.B.: import java.awt.*;)
 * Ã„nderungen in Klassen von allgemeiner Relevanz mit Versionsdatum, Person und Beschreibung notieren!
 
